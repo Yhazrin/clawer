@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "paths": {
+      "@/*": ["./*"],
+      "@clawer/shared": ["../../packages/shared/src"],
+      "@clawer/shared/*": ["../../packages/shared/src/*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx", ".expo/**/*.ts"],
+  "exclude": ["node_modules"]
+}

@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "clawer-mobile",
+    "slug": "clawer-mobile",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.clawer.mobile"
+    },
+    "android": {
+      "package": "com.clawer.mobile"
+    },
+    "plugins": ["expo-router"]
+  }
+}

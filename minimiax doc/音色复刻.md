@@ -1,0 +1,240 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://platform.minimaxi.com/docs/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# 音色快速复刻
+
+> MiniMax 语音模型提供良好的音色复刻能力，使用您的语料进行音色复刻，得到试听音频与 Voice ID（供后续正式语音合成使用）。
+
+## 使用流程
+
+快速复刻功能实现具体操作流程如下：
+
+1. **上传待克隆音频** 调用 [上传复刻音频](/api-reference/voice-cloning-uploadcloneaudio) 上传待克隆的音频文件并获取 `file_id`。
+
+* 支持上传的文件需遵从以下规范： 上传的音频文件格式需为：mp3、m4a、wav 格式； 上传的音频文件的时长最少应不低于 10 秒，最长应不超过 5 分钟； 上传的音频文件大小需不超过 20mb。
+
+2. **上传示例音频 (可选)** 若需要提供示例音频以增强克隆效果，需要调用 [上传示例音频](/api-reference/voice-cloning-uploadprompt)上传示例音频文件并获得对应的 `file_id`。填写在`clone_prompt`中的`prompt_audio`中。
+
+* 支持上传的文件需遵从以下规范： 上传的音频文件格式需为：mp3、m4a、wav 格式； 上传的音频文件的时长小于 8s； 上传的音频文件大小需不超过 20mb。
+
+3. **调用复刻接口** 基于获取的 `file_id` 和自定义的 `voice_id` 作为输入参数，调用 [快速复刻接口](https://platform.minimaxi.com/document/%E5%BF%AB%E9%80%9F%E5%85%8B%E9%9A%86?key=66719032a427f0c8a570165b) 克隆音色。
+4. **使用克隆音色** 使用复刻生成的 `voice_id`，根据实际需求调用语音生成接口，例如：
+   * [同步语音合成](https://platform.minimaxi.com/document/T2A%20V2?key=66719005a427f0c8a5701643)
+   * [异步长文本语音合成](https://platform.minimaxi.com/document/T2A%20Large%20v2?key=66b3559f290299a26b2347d2)
+
+## 过程示例
+
+### 1. 上传复刻音频
+
+<CodeGroup>
+  ```python  theme={null}
+  """
+  本示例用于获取复刻音频的 file_id。
+  注意：需要先将密钥信息写入环境变量 `MINIMAX_API_KEY`。
+  """
+  import requests
+  import os
+
+  api_key = os.getenv("MINIMAX_API_KEY")
+  url = "https://api.minimaxi.com/v1/files/upload"
+
+  payload = {"purpose": "voice_clone"}
+  files = [
+    ("file", ("clone_input.mp3", open("/path/to/clone_input.mp3", "rb")))
+  ]
+  headers = {
+    "Authorization": f"Bearer {api_key}"
+  }
+
+  response = requests.post(url, headers=headers, data=payload, files=files)
+  response.raise_for_status()
+  file_id = response.json().get("file", {}).get("file_id")
+  print(file_id)
+  ```
+
+  ```bash  theme={null}
+  curl --location 'https://api.minimaxi.com/v1/files/upload' \
+    --header 'Authorization: Bearer ${MINIMAX_API_KEY}' \
+    --form 'purpose="voice_clone"' \
+    --form 'file=@"/path/to/clone_input.mp3"'
+  ```
+</CodeGroup>
+
+### 2. 上传参考音频
+
+<CodeGroup>
+  ```python  theme={null}
+  """
+  本示例用于获取示例音频的 file_id。
+  注意：需要先将密钥信息写入环境变量 `MINIMAX_API_KEY`。
+  """
+  import requests
+  import os
+
+  api_key = os.getenv("MINIMAX_API_KEY")
+  url = "https://api.minimaxi.com/v1/files/upload"
+
+  payload = {"purpose": "prompt_audio"}
+  files = [
+    ("file", ("clone_prompt.mp3", open("/path/to/clone_prompt.mp3", "rb")))
+  ]
+  headers = {
+    "Authorization": f"Bearer {api_key}"
+  }
+
+  response = requests.post(url, headers=headers, data=payload, files=files)
+  response.raise_for_status()
+  prompt_file_id = response.json().get("file", {}).get("file_id")
+  print(prompt_file_id)
+  ```
+
+  ```bash  theme={null}
+  curl --location 'https://api.minimaxi.com/v1/files/upload' \
+    --header 'Authorization: Bearer ${MINIMAX_API_KEY}' \
+    --form 'purpose="prompt_audio"' \
+    --form 'file=@"/path/to/clone_prompt.mp3"'
+  ```
+</CodeGroup>
+
+### 3. 进行音色克隆
+
+<CodeGroup>
+  ```python  theme={null}
+  """
+  本示例用于音色克隆。
+  注意：需要设置环境变量 `MINIMAX_API_KEY`，
+  并将 "<voice_id>", <file_id_of_cloned_voice>, <file_id_of_prompt_audio> 替换为实际值。
+  """
+  import requests
+  import json
+  import os
+
+  api_key = os.getenv("MINIMAX_API_KEY")
+  url = "https://api.minimaxi.com/v1/voice_clone"
+
+  clone_payload = {
+      "file_id": file_id,
+      "voice_id": "<your_custom_voice_id>",
+      "clone_prompt": {
+          "prompt_audio": prompt_file_id,
+          "prompt_text": "后来认为啊，是有人抓这鸡，可是抓鸡的地方呢没人听过鸡叫。"
+      },
+      "text": "大兄弟，听您口音不是本地人吧，头回来天津卫，啊，待会您可甭跟着导航走，那玩意儿净给您往大马路上绕。",
+      "model": "speech-2.8-hd"
+  }
+  clone_headers = {
+      "Authorization": f"Bearer {api_key}",
+      "Content-Type": "application/json"
+  }
+
+  response = requests.post(url, headers=headers, json=payload)
+  response.raise_for_status()
+  print(response.text)
+  ```
+
+  ```bash  theme={null}
+  curl --location 'https://api.minimaxi.com/v1/voice_clone' \
+    --header 'Authorization: Bearer ${MINIMAX_API_KEY}' \
+    --header 'Content-Type: application/json' \
+    --data '{
+      "file_id": <file_id_of_cloned_voice>,
+      "voice_id": "<your_custom_voice_id>",
+      "clone_prompt": {
+        "prompt_audio": <file_id_of_prompt_audio>,
+        "prompt_text": "后来认为啊，是有人抓这鸡，可是抓鸡的地方呢没人听过鸡叫。"
+      },
+      "text": "大兄弟，听您口音不是本地人吧，头回来天津卫，啊，待会您可甭跟着导航走，那玩意净给您往大马路上绕。",
+      "model": "speech-2.8"
+    }'
+  ```
+</CodeGroup>
+
+## 完整示例
+
+<CodeGroup>
+  ```python  theme={null}
+  """
+  本示例用于快速克隆音色并获取试听文件。
+  注意：需要先将密钥信息写入环境变量 `MINIMAX_API_KEY`，
+  并将"<your_custom_voice_id>"替换为您定义的音色 id。
+  """
+  import json
+  import requests
+  import os
+
+  api_key = os.getenv("MINIMAX_API_KEY")
+  upload_url = "https://api.minimaxi.com/v1/files/upload"
+  clone_url = "https://api.minimaxi.com/v1/voice_clone"
+  headers = {"Authorization": f"Bearer {api_key}"}
+
+  with open("/path/to/clone_input.mp3", "rb") as f:
+      files = {"file": ("clone_input.mp3", f)}
+      data = {"purpose": "voice_clone"}
+      response = requests.post(upload_url, headers=headers, data=data, files=files)
+  file_id = response.json()["file"]["file_id"]
+  print(f"File ID of the cloned audio: {file_id}")
+
+  # 2. 上传示例音频
+
+  with open("/path/to/clone_prompt.mp3", "rb") as f:
+      files = {"file": ("clone_prompt.mp3", f)}
+      data = {"purpose": "prompt_audio"}
+      response = requests.post(upload_url, headers=headers, data=data, files=files)
+  prompt_file_id = response.json()["file"]["file_id"]
+  print(f"File ID of the prompt audio: {prompt_file_id}")
+
+  # 3. 进行音色克隆
+
+  clone_payload = {
+      "file_id": file_id,
+      "voice_id": "<your_custom_voice_id>",
+      "clone_prompt": {
+          "prompt_audio": prompt_file_id,
+          "prompt_text": "后来认为啊，是有人抓这鸡，可是抓鸡的地方呢没人听过鸡叫。"
+      },
+      "text": "大兄弟，听您口音不是本地人吧，头回来天津卫，啊，待会您可甭跟着导航走，那玩意儿净给您往大马路上绕。",
+      "model": "speech-2.8-hd"
+  }
+  clone_headers = {
+      "Authorization": f"Bearer {api_key}",
+      "Content-Type": "application/json"
+  }
+  response = requests.post(clone_url, headers=clone_headers, json=clone_payload)
+  print(response.text)
+  ```
+</CodeGroup>
+
+## 结果示例
+
+* **复刻音频**
+
+<video controls className="audio-container" src="https://filecdn.minimax.chat/public/9a226362-dddb-42bc-99fd-e8b426539ca7.wav" />
+
+* **示例音频**
+
+<video controls className="audio-container" src="https://filecdn.minimax.chat/public/846b954e-772f-4e26-a598-eac0bce1b491.wav" />
+
+* **结果音频**
+
+<video controls className="audio-container" src="https://filecdn.minimax.chat/public/90f581ac-cf37-4866-be54-711689c14cf9.mp3" />
+
+## 推荐阅读
+
+<Columns cols={2}>
+  <Card title="快速复刻接口" icon="book-open" href="/api-reference/voice-cloning-clone" arrow="true" cta="点击查看">
+    使用 API 接口进行音色快速复刻。
+  </Card>
+
+  <Card title="同步语音合成指南" icon="book-open" href="/guides/speech-t2a-websocket" arrow="true" cta="点击查看">
+    同步语音合成支持基于文本到语音的同步生成，单次可处理最长 10,000 字符的文本。
+  </Card>
+
+  <Card title="产品定价" icon="book-open" href="/guides/pricing-paygo#语音" arrow="true" cta="点击查看">
+    各模型的定价说明、计费方式及使用限制。
+  </Card>
+
+  <Card title="速率限制" icon="book-open" href="/guides/rate-limits#3、我们的-api-的限速具体数值" arrow="true" cta="点击查看">
+    为保证资源的高效使用，引入速率限制，以确保服务的可用性、稳定性。
+  </Card>
+</Columns>
