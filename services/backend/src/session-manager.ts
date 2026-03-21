@@ -13,6 +13,14 @@ export interface BackendSession {
   updatedAt: number;
   messages: Message[];
   status: "active" | "ended";
+  /** Session-level TTS config set by frontend */
+  ttsConfig?: {
+    modelId: string;
+    voiceId: string;
+    speed: number;
+    volume: number;
+    pitch: number;
+  };
 }
 
 const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -58,6 +66,27 @@ export class SessionManager {
     return session;
   }
 
+  getOrCreateSession(sessionId: string): BackendSession {
+    const existing = this.sessions.get(sessionId);
+    if (existing) return existing;
+
+    // Auto-create session with defaults
+    const now = Date.now();
+    const session: BackendSession = {
+      id: sessionId,
+      title: "New Session",
+      agentId: "trump",
+      voiceConfigId: "female_shuangkuai",
+      createdAt: now,
+      updatedAt: now,
+      messages: [],
+      status: "active",
+    };
+    this.sessions.set(sessionId, session);
+    console.log(`[session] Auto-created session: ${sessionId}`);
+    return session;
+  }
+
   getSession(sessionId: string): BackendSession | null {
     return this.sessions.get(sessionId) ?? null;
   }
@@ -96,6 +125,19 @@ export class SessionManager {
         console.log(`[session] Cleaning up expired session: ${id}`);
         this.sessions.delete(id);
       }
+    }
+  }
+
+  /** Update TTS config for an existing session */
+  updateTtsConfig(
+    sessionId: string,
+    config: { modelId: string; voiceId: string; speed: number; volume: number; pitch: number }
+  ): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.ttsConfig = config;
+      session.updatedAt = Date.now();
+      console.log(`[session] Updated TTS config for ${sessionId}:`, config);
     }
   }
 

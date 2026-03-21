@@ -4,40 +4,74 @@ import { useVoiceRecorder } from "../hooks/useVoiceRecorder";
 
 interface VoiceRecorderProps {
   onAudioReady: (blob: Blob) => void;
+  onTranscript?: (text: string) => void;
+  onInterimTranscript?: (text: string) => void;
 }
 
-export function VoiceRecorder({ onAudioReady }: VoiceRecorderProps) {
-  const { status, toggleRecording } = useVoiceRecorder(onAudioReady);
-  const isRecording = status === "recording";
+export function VoiceRecorder({
+  onAudioReady,
+  onTranscript,
+  onInterimTranscript,
+}: VoiceRecorderProps) {
+  const {
+    status,
+    interimText,
+    toggleRecording,
+    useSpeechApi,
+  } = useVoiceRecorder({
+    onTranscript,
+    onInterimTranscript,
+    onAudioReady,
+  });
 
   return (
-    <button
-      className={`voice-btn ${isRecording ? "voice-btn-recording" : ""}`}
-      onClick={toggleRecording}
-      disabled={status === "processing"}
-      aria-label={isRecording ? "停止录音" : "开始录音"}
-      title={isRecording ? "点击停止录音" : "点击开始录音"}
-    >
-      {isRecording ? (
-        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
-          <rect x="4" y="4" width="12" height="12" rx="2" fill="currentColor" />
-        </svg>
-      ) : (
-        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
-          <path
-            d="M10 1a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
-            fill="currentColor"
-          />
-          <path
-            d="M5 9a5 5 0 0 0 10 0M10 14v4M7 18h6"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            fill="none"
-            strokeLinecap="round"
-          />
-        </svg>
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      {/* Interim transcript preview */}
+      {status === "recording" && interimText && (
+        <span
+          style={{
+            fontSize: 12,
+            color: "var(--text-muted)",
+            maxWidth: 120,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {interimText}
+        </span>
       )}
-      {isRecording && <span className="pulse-ring" />}
-    </button>
+
+      <button
+        className={`voice-btn ${status === "recording" ? "voice-btn-recording" : ""}`}
+        onClick={toggleRecording}
+        aria-label={status === "recording" ? "停止录音" : "开始语音输入"}
+        title={useSpeechApi ? "语音输入（实时转文字）" : "语音输入（需后端转录）"}
+      >
+        {/* Mic icon */}
+        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+          {status === "recording" ? (
+            /* Stop square */
+            <rect x="4" y="4" width="10" height="10" rx="1.5" fill="currentColor" />
+          ) : (
+            /* Mic */
+            <>
+              <path
+                d="M9 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 9 1z"
+                fill="currentColor"
+              />
+              <path
+                d="M4.5 7.5a4.5 4.5 0 0 0 9 0M9 13v3.5M6.5 16.5h5"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+                fill="none"
+              />
+            </>
+          )}
+        </svg>
+        {status === "recording" && <span className="pulse-ring" />}
+      </button>
+    </div>
   );
 }

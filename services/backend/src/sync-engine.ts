@@ -14,7 +14,7 @@ const SENTENCE_ENDINGS = /[。！？.!?]/;
 const FALLBACK_SPLITS = /[,，；;、]/;
 const MAX_BUFFER = 80;
 
-export type OnSentence = (sentence: string) => void;
+export type OnSentence = (sentence: string) => Promise<void> | void;
 export type OnToken = (token: string) => void;
 
 export class SyncEngine {
@@ -30,19 +30,33 @@ export class SyncEngine {
   /**
    * Receive a single token from the Agent Bridge.
    * Internally accumulates text and flushes at sentence boundaries.
+   * Returns any pending onSentence promise (for caller to collect).
    */
-  receiveToken(token: string): void {
+  receiveToken(token: string): Promise<void> | void {
     // Forward every token immediately for typewriter effect
     this.onToken(token);
 
     this.buffer += token;
 
     // Try sentence-level split
-    this.tryFlushByPunctuation();
+    const idx = this.findLastMatch(this.buffer, SENTENCE_ENDINGS);
+    if (idx !== -1) {
+      const sentence = this.buffer.slice(0, idx + 1);
+      this.buffer = this.buffer.slice(idx + 1);
+      return this.onSentence(sentence);
+    }
 
     // Fallback: buffer too long, split at comma / semicolon
     if (this.buffer.length > MAX_BUFFER) {
-      this.tryFlushByFallback();
+      const fIdx = this.findLastMatch(this.buffer, FALLBACK_SPLITS);
+      if (fIdx === -1) {
+        const sentence = this.buffer;
+        this.buffer = "";
+        return this.onSentence(sentence);
+      }
+      const sentence = this.buffer.slice(0, fIdx + 1);
+      this.buffer = this.buffer.slice(fIdx + 1);
+      return this.onSentence(sentence);
     }
   }
 
@@ -50,34 +64,12 @@ export class SyncEngine {
    * Signal that the Agent has finished streaming.
    * Flush any remaining buffer as the final sentence.
    */
-  flush(): void {
+  flush(): Promise<void> | void {
     if (this.buffer.length > 0) {
-      this.onSentence(this.buffer);
+      const result = this.onSentence(this.buffer);
       this.buffer = "";
+      return result;
     }
-  }
-
-  // -----------------------------------------------------------------------
-
-  private tryFlushByPunctuation(): void {
-    const idx = this.findLastMatch(this.buffer, SENTENCE_ENDINGS);
-    if (idx === -1) return;
-    const sentence = this.buffer.slice(0, idx + 1);
-    this.buffer = this.buffer.slice(idx + 1);
-    this.onSentence(sentence);
-  }
-
-  private tryFlushByFallback(): void {
-    const idx = this.findLastMatch(this.buffer, FALLBACK_SPLITS);
-    if (idx === -1) {
-      // No fallback split found — force-flush entire buffer
-      this.onSentence(this.buffer);
-      this.buffer = "";
-      return;
-    }
-    const sentence = this.buffer.slice(0, idx + 1);
-    this.buffer = this.buffer.slice(idx + 1);
-    this.onSentence(sentence);
   }
 
   /** Return the index of the last character matching `re`, or -1. */

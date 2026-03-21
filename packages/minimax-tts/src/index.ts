@@ -237,64 +237,120 @@ export class MiniMaxTTS {
       headers: { Authorization: `Bearer ${this.apiKey}` },
     }) as any;
 
-    const chunks: Buffer[] = [];
+    // Queue of yielded chunks for external consumption
+    const chunkQueue: Buffer[] = [];
+    let resolveNext: ((buf: Buffer) => void) | null = null;
+    let finished = false;
+    let error: Error | null = null;
 
-    const resultPromise = new Promise<Buffer[]>((resolve, reject) => {
-      ws.on("open", () => {
-        // wait for connected_success event
-      });
+    const cleanup = () => {
+      ws.removeAllListeners("message");
+      ws.removeAllListeners("error");
+      ws.removeAllListeners("close");
+      if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) {
+        ws.close();
+      }
+    };
 
-      ws.on("message", (data: Buffer | string) => {
-        const msg: MiniMaxWSTTSMessage = JSON.parse(data.toString());
+    ws.on("message", (data: Buffer | string) => {
+      const msgRaw = data.toString();
+      let msg: MiniMaxWSTTSMessage;
+      try {
+        msg = JSON.parse(msgRaw);
+      } catch (e) {
+        console.error("[MiniMaxTTS] Failed to parse message:", msgRaw.slice(0, 200));
+        return;
+      }
 
-        if (msg.event === "connected_success") {
-          ws.send(
-            JSON.stringify({
-              event: "task_start",
-              model: options?.model ?? DEFAULT_MODEL,
-              voice_setting: {
-                voice_id: options?.voiceId ?? DEFAULT_VOICE_ID,
-                speed: clamp(options?.speed ?? DEFAULT_SPEED, 0.5, 2.0),
-                vol: clamp(options?.volume ?? DEFAULT_VOLUME, 0.1, 2.0),
-                pitch: clamp(options?.pitch ?? DEFAULT_PITCH, -12, 12),
-              },
-              audio_setting: {
-                sample_rate: PCM_SAMPLE_RATE,
-                bitrate: 64000,
-                format: "pcm",
-                channel: 1,
-              },
-            })
-          );
-        } else if (msg.event === "task_started") {
-          ws.send(
-            JSON.stringify({
-              event: "task_continue",
-              text,
-            })
-          );
+      // Log all events for debugging
+      console.log("[MiniMaxTTS] event:", msg.event, "hasAudio:", !!msg.data?.audio, "audioLen:", msg.data?.audio?.length || 0, "isFinal:", msg.is_final, "baseResp:", JSON.stringify(msg.base_resp));
+
+      if (msg.event === "connected_success") {
+        ws.send(
+          JSON.stringify({
+            event: "task_start",
+            model: options?.model ?? DEFAULT_MODEL,
+            voice_setting: {
+              voice_id: options?.voiceId ?? DEFAULT_VOICE_ID,
+              speed: clamp(options?.speed ?? DEFAULT_SPEED, 0.5, 2.0),
+              vol: clamp(options?.volume ?? DEFAULT_VOLUME, 0.1, 2.0),
+              pitch: clamp(options?.pitch ?? DEFAULT_PITCH, -12, 12),
+            },
+            audio_setting: {
+              sample_rate: PCM_SAMPLE_RATE,
+              bitrate: 64000,
+              format: "pcm",
+              channel: 1,
+            },
+          })
+        );
+      } else if (msg.event === "task_started") {
+        ws.send(
+          JSON.stringify({
+            event: "task_continue",
+            text,
+          })
+        );
+      }
+
+      // Yield each audio chunk immediately as it arrives
+      if (msg.data?.audio) {
+        const buf = Buffer.from(msg.data.audio, "hex");
+        // If there's a pending consumer waiting, resolve it directly
+        if (resolveNext) {
+          resolveNext(buf);
+          resolveNext = null;
+        } else {
+          // Otherwise queue it
+          chunkQueue.push(buf);
         }
+      }
 
-        if (msg.data?.audio) {
-          const buf = Buffer.from(msg.data.audio, "hex");
-          chunks.push(buf);
-        }
+      if (msg.event === "error" || msg.base_resp?.status_code !== undefined) {
+        // Handle both typed base_resp and untyped code/message fields
+        const raw = msg as unknown as Record<string, unknown>;
+        const errCode = msg.base_resp?.status_code ?? (typeof raw.code === 'number' ? raw.code : -1);
+        const errMsg = msg.base_resp?.status_msg ?? (typeof raw.message === 'string' ? raw.message : 'Unknown error');
+        console.error("[MiniMaxTTS] API error:", errCode, errMsg);
+        cleanup();
+        error = new Error(`MiniMax API error ${errCode}: ${errMsg}`);
+        finished = true;
+        return;
+      }
 
-        if (msg.is_final) {
-          ws.send(JSON.stringify({ event: "task_finish" }));
-          ws.close();
-          resolve(chunks);
-        }
-      });
-
-      ws.on("error", (err: Error) => {
-        reject(err);
-      });
+      if (msg.is_final) {
+        ws.send(JSON.stringify({ event: "task_finish" }));
+        cleanup();
+        finished = true;
+      }
     });
 
-    const result = await resultPromise;
-    for (const chunk of result) {
-      yield chunk;
+    ws.on("error", (err: Error) => {
+      console.error("[MiniMaxTTS] WebSocket error:", err.message);
+      cleanup();
+      error = err;
+      finished = true;
+    });
+
+    ws.on("close", () => {
+      console.log("[MiniMaxTTS] WebSocket closed");
+      finished = true;
+    });
+
+    // Yield chunks as they arrive via the queue
+    while (!finished || chunkQueue.length > 0) {
+      if (chunkQueue.length > 0) {
+        yield chunkQueue.shift()!;
+      } else if (error) {
+        throw error;
+      } else if (finished) {
+        break;
+      } else {
+        // Wait for next chunk via a promise
+        await new Promise<Buffer>((resolve) => {
+          resolveNext = resolve;
+        });
+      }
     }
   }
 

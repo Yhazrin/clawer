@@ -74,7 +74,16 @@ export class MiniMaxTTSMock {
       const segment = segments[i];
       const durationMs = Math.max(50, segment.length * 80);
       const numSamples = Math.floor((durationMs / 1000) * SAMPLE_RATE);
-      yield Buffer.alloc(numSamples * BYTES_PER_SAMPLE, 0);
+      const pcm = Buffer.alloc(numSamples * BYTES_PER_SAMPLE);
+      // 生成 440Hz 正弦波作为测试音（可听提示音）
+      const FREQ = 440;
+      const amplitude = 8000;
+      for (let s = 0; s < numSamples; s++) {
+        const t = s / SAMPLE_RATE;
+        const sample = Math.round(amplitude * Math.sin(2 * Math.PI * FREQ * t));
+        pcm.writeInt16LE(sample, s * BYTES_PER_SAMPLE);
+      }
+      yield pcm;
     }
   }
 

@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface Voice {
   voiceId: string;
   name: string;
   gender: string;
   language: string;
+  description?: string;
 }
 
 interface VoicePanelProps {
@@ -20,33 +21,61 @@ interface VoicePanelProps {
     volume: number;
     pitch: number;
   }) => void;
+  onVoiceClone?: (audioBuffer: ArrayBuffer, name: string) => void;
+  /** When set by parent (from voice_clone_success), auto-select this voice */
+  clonedVoiceId?: string | null;
 }
 
 const MODELS = [
-  { modelId: "speech-01", name: "Speech-01" },
-  { modelId: "speech-02-turbo", name: "Speech-02 Turbo" },
+  { modelId: "speech-02-hd", name: "Speech-02 HD", desc: "高质量（推荐）" },
+  { modelId: "speech-02-turbo", name: "Speech-02 Turbo", desc: "低延迟" },
+  { modelId: "speech-2.8-hd", name: "Speech-2.8 HD", desc: "标准高质量" },
+  { modelId: "speech-2.8-turbo", name: "Speech-2.8 Turbo", desc: "标准低延迟" },
+  { modelId: "speech-2.6-hd", name: "Speech-2.6 HD", desc: "经典高质量" },
+  { modelId: "speech-2.6-turbo", name: "Speech-2.6 Turbo", desc: "经典低延迟" },
 ];
 
 const VOICES: Voice[] = [
-  { voiceId: "female_shuangkuai", name: "爽快女声", gender: "female", language: "zh-CN" },
-  { voiceId: "male_chengshu", name: "成熟男声", gender: "male", language: "zh-CN" },
-  { voiceId: "female_qinqie", name: "亲切女声", gender: "female", language: "zh-CN" },
-  { voiceId: "male_qingnian", name: "青年男声", gender: "male", language: "zh-CN" },
-  { voiceId: "female_wanyue", name: "温婉女声", gender: "female", language: "zh-CN" },
-  { voiceId: "male_cidian", name: "磁性男声", gender: "male", language: "zh-CN" },
+  { voiceId: "Chinese (Mandarin)_News_Anchor", name: "新闻主播", gender: "female", language: "zh-CN" },
+  { voiceId: "Chinese (Mandarin)_Young_Female", name: "年轻女声", gender: "female", language: "zh-CN" },
+  { voiceId: "Chinese (Mandarin)_Young_Male", name: "年轻男声", gender: "male", language: "zh-CN" },
+  { voiceId: "Chinese (Mandarin)_Mature_Female", name: "成熟女声", gender: "female", language: "zh-CN" },
+  { voiceId: "Chinese (Mandarin)_Mature_Male", name: "成熟男声", gender: "male", language: "zh-CN" },
+  { voiceId: "Chinese (Mandarin)_Elderly_Female", name: "老年女声", gender: "female", language: "zh-CN" },
+  { voiceId: "Chinese (Mandarin)_Elderly_Male", name: "老年男声", gender: "male", language: "zh-CN" },
+  { voiceId: "Chinese (Mandarin)_Sweet_Female", name: "甜美女声", gender: "female", language: "zh-CN" },
+  { voiceId: "Chinese (Mandarin)_Calm_Male", name: "沉稳男声", gender: "male", language: "zh-CN" },
+  { voiceId: "Chinese (Mandarin)_Cheerful_Female", name: "活泼女声", gender: "female", language: "zh-CN" },
+  { voiceId: "Chinese (Mandarin)_Deep_Male", name: "低沉男声", gender: "male", language: "zh-CN" },
+  { voiceId: "Chinese (Mandarin)_Professional_Female", name: "专业女声", gender: "female", language: "zh-CN" },
 ];
 
-export function VoicePanel({ isOpen, onToggle, onVoiceChange, onConfigChange }: VoicePanelProps) {
-  const [model, setModel] = useState("speech-01");
-  const [voiceId, setVoiceId] = useState("female_shuangkuai");
+export function VoicePanel({ isOpen, onToggle, onVoiceChange, onConfigChange, onVoiceClone, clonedVoiceId }: VoicePanelProps) {
+  const [model, setModel] = useState("speech-02-hd");
+  const [voiceId, setVoiceId] = useState("Chinese (Mandarin)_News_Anchor");
   const [speed, setSpeed] = useState(1.0);
   const [volume, setVolume] = useState(1.0);
   const [pitch, setPitch] = useState(0);
+  const [cloneFile, setCloneFile] = useState<string | null>(null);
+  const [cloneStatus, setCloneStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
+  const [clonedVoiceIdLocal, setClonedVoiceIdLocal] = useState<string | null>(null);
 
   const emitConfig = (overrides: Partial<{ modelId: string; voiceId: string; speed: number; volume: number; pitch: number }>) => {
     const config = { modelId: model, voiceId, speed, volume, pitch, ...overrides };
     onConfigChange?.(config);
   };
+
+  // When parent tells us about a cloned voice from the server, auto-select it
+  useEffect(() => {
+    if (clonedVoiceId && clonedVoiceId !== clonedVoiceIdLocal) {
+      setClonedVoiceIdLocal(clonedVoiceId);
+      setCloneStatus("success");
+      // Auto-select the cloned voice
+      setVoiceId(clonedVoiceId);
+      onVoiceChange?.(clonedVoiceId);
+      emitConfig({ voiceId: clonedVoiceId });
+    }
+  }, [clonedVoiceId]);
 
   const handleModelChange = (m: string) => {
     setModel(m);
@@ -57,6 +86,7 @@ export function VoicePanel({ isOpen, onToggle, onVoiceChange, onConfigChange }: 
     setVoiceId(v);
     onVoiceChange?.(v);
     emitConfig({ voiceId: v });
+    setCloneFile(null); // Clear clone when selecting preset
   };
 
   return (
@@ -68,11 +98,12 @@ export function VoicePanel({ isOpen, onToggle, onVoiceChange, onConfigChange }: 
             fill="currentColor"
           />
         </svg>
-        <span>音色配置</span>
+        <span>语音设置</span>
       </button>
 
       {isOpen && (
         <div className="voice-panel-body">
+          {/* Model selector */}
           <div className="panel-section">
             <label className="panel-label">TTS 模型</label>
             <select
@@ -86,15 +117,19 @@ export function VoicePanel({ isOpen, onToggle, onVoiceChange, onConfigChange }: 
                 </option>
               ))}
             </select>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+              {MODELS.find((m) => m.modelId === model)?.desc}
+            </div>
           </div>
 
+          {/* Voice grid */}
           <div className="panel-section">
             <label className="panel-label">系统音色</label>
             <div className="voice-grid">
               {VOICES.map((v) => (
                 <button
                   key={v.voiceId}
-                  className={`voice-card ${voiceId === v.voiceId ? "voice-card-active" : ""}`}
+                  className={`voice-card ${voiceId === v.voiceId || clonedVoiceIdLocal === v.voiceId ? "voice-card-active" : ""}`}
                   onClick={() => handleVoiceSelect(v.voiceId)}
                 >
                   <span className="voice-card-icon">
@@ -106,6 +141,7 @@ export function VoicePanel({ isOpen, onToggle, onVoiceChange, onConfigChange }: 
             </div>
           </div>
 
+          {/* Speed */}
           <div className="panel-section">
             <label className="panel-label">
               语速 <span className="panel-value">{speed.toFixed(1)}x</span>
@@ -125,6 +161,7 @@ export function VoicePanel({ isOpen, onToggle, onVoiceChange, onConfigChange }: 
             />
           </div>
 
+          {/* Volume */}
           <div className="panel-section">
             <label className="panel-label">
               音量 <span className="panel-value">{Math.round(volume * 100)}%</span>
@@ -144,6 +181,7 @@ export function VoicePanel({ isOpen, onToggle, onVoiceChange, onConfigChange }: 
             />
           </div>
 
+          {/* Pitch */}
           <div className="panel-section">
             <label className="panel-label">
               音调 <span className="panel-value">{pitch > 0 ? `+${pitch}` : pitch}</span>
@@ -163,7 +201,8 @@ export function VoicePanel({ isOpen, onToggle, onVoiceChange, onConfigChange }: 
             />
           </div>
 
-          <div className="panel-section">
+          {/* Voice cloning */}
+          <div className="panel-section voice-clone-upload">
             <label className="panel-label">音色复刻</label>
             <label className="voice-clone-btn">
               <input
@@ -172,13 +211,41 @@ export function VoicePanel({ isOpen, onToggle, onVoiceChange, onConfigChange }: 
                 className="sr-only"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) {
-                    // TODO: upload for voice cloning
-                  }
+                  if (!file || !onVoiceClone) return;
+                  setCloneFile(file.name);
+                  setCloneStatus("uploading");
+                  setClonedVoiceIdLocal(null);
+                  // Read file as ArrayBuffer and pass to parent
+                  const reader = new FileReader();
+                  reader.onload = (ev) => {
+                    const buffer = ev.target?.result;
+                    if (buffer instanceof ArrayBuffer) {
+                      onVoiceClone(buffer, file.name.replace(/\.[^.]+$/, ""));
+                    } else {
+                      setCloneStatus("error");
+                    }
+                  };
+                  reader.onerror = () => {
+                    setCloneStatus("error");
+                  };
+                  reader.readAsArrayBuffer(file);
                 }}
               />
-              上传参考音频
+              {cloneFile ? "🔄 重新上传" : "📁 上传参考音频"}
             </label>
+            {cloneFile && (
+              <div className="voice-clone-status">
+                {cloneStatus === "uploading" && <span>🔄 上传中...</span>}
+                {cloneStatus === "success" && clonedVoiceIdLocal && (
+                  <span>✅ 复刻成功：{clonedVoiceIdLocal}</span>
+                )}
+                {cloneStatus === "error" && <span>❌ 复刻失败</span>}
+                {cloneStatus === "idle" && <span>🎵 {cloneFile}</span>}
+              </div>
+            )}
+            <div className="voice-clone-info">
+              上传 3-10 秒清晰人声参考音频（mp3/wav），即可复刻该音色用于对话
+            </div>
           </div>
         </div>
       )}

@@ -61,6 +61,7 @@ export function useWebSocket(sessionId: string) {
     const sid = sessionIdRef.current;
     const url = sid ? `${WS_URL}?sessionId=${sid}` : WS_URL;
     const ws = new WebSocket(url);
+    ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -84,12 +85,26 @@ export function useWebSocket(sessionId: string) {
         try {
           const msg: WSIncomingMessage = JSON.parse(event.data);
           if (msg.type === "pong") return;
+          // Respond to server's heartbeat ping with pong
+          if (msg.type === "ping") {
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(
+                JSON.stringify({ type: "pong", payload: {}, timestamp: Date.now() })
+              );
+            }
+            return;
+          }
           emit(msg.type, msg.payload);
         } catch {
           // ignore malformed messages
         }
       } else if (event.data instanceof ArrayBuffer) {
         emit("audio_chunk_binary", event.data);
+      } else if (event.data instanceof Blob) {
+        // Fallback: convert Blob to ArrayBuffer
+        event.data.arrayBuffer().then((buf) => {
+          emit("audio_chunk_binary", buf);
+        });
       }
     };
 
@@ -169,6 +184,27 @@ export function useWebSocket(sessionId: string) {
     }
   }, []);
 
+  const sendConfig = useCallback((config: {
+    modelId: string;
+    voiceId: string;
+    speed: number;
+    volume: number;
+    pitch: number;
+  }) => {
+    send("tts_config", config);
+  }, [send]);
+
+  const sendVoiceClone = useCallback((audioBuffer: ArrayBuffer, name: string) => {
+    // Convert ArrayBuffer to base64
+    const bytes = new Uint8Array(audioBuffer);
+    let binary = "";
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64 = btoa(binary);
+    send("voice_clone", { audio: base64, name });
+  }, [send]);
+
   const on = useCallback((type: string, fn: Listener) => {
     if (!listenersRef.current.has(type)) {
       listenersRef.current.set(type, new Set());
@@ -201,6 +237,8 @@ export function useWebSocket(sessionId: string) {
     sendVoiceChange,
     sendAudioControl,
     sendAudioData,
+    sendConfig,
+    sendVoiceClone,
     on,
   };
 }

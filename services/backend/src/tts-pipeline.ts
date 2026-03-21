@@ -7,12 +7,15 @@
 
 import { MiniMaxTTS } from "@clawer/minimax-tts";
 
-const USE_MOCK = !process.env.MINIMAX_API_KEY;
+// Lazy check — dotenv may not be loaded when this module is first imported
+function isMockMode(): boolean {
+  return !process.env.MINIMAX_API_KEY;
+}
 
 // Default audio spec: PCM 16-bit, 24000 Hz, mono
 const SAMPLE_RATE = 24000;
 const BYTES_PER_SAMPLE = 2; // 16-bit = 2 bytes
-const CHUNK_DURATION_MS = 100; // each chunk covers 100 ms of audio
+const CHUNK_DURATION_MS = 200; // each chunk covers 200 ms of audio for better AudioContext stability
 const CHUNK_SIZE = Math.floor((SAMPLE_RATE * BYTES_PER_SAMPLE * CHUNK_DURATION_MS) / 1000);
 
 export interface VoiceConfig {
@@ -22,10 +25,17 @@ export interface VoiceConfig {
   pitch: number;
 }
 
-// Singleton TTS client
-const ttsClient = MiniMaxTTS.create({
-  apiKey: process.env.MINIMAX_API_KEY || "",
-});
+// Lazy singleton TTS client — created on first use after dotenv loads
+let _ttsClient: MiniMaxTTS | null = null;
+
+function getTtsClient(): MiniMaxTTS {
+  if (!_ttsClient) {
+    _ttsClient = MiniMaxTTS.create({
+      apiKey: process.env.MINIMAX_API_KEY || "",
+    });
+  }
+  return _ttsClient;
+}
 
 /**
  * Synthesize text to an async generator of audio Buffer chunks.
@@ -37,7 +47,7 @@ export async function* synthesize(
   text: string,
   voiceConfig: VoiceConfig,
 ): AsyncGenerator<Buffer> {
-  if (USE_MOCK) {
+  if (isMockMode()) {
     yield* mockSynthesize(text, voiceConfig);
   } else {
     yield* realSynthesize(text, voiceConfig);
@@ -82,7 +92,7 @@ async function* realSynthesize(
     pitch: voiceConfig.pitch,
   };
 
-  yield* ttsClient.synthesizeWebSocket(text, options);
+  yield* getTtsClient().synthesizeWebSocket(text, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -100,4 +110,17 @@ function estimateDurationMs(text: string): number {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Clone a voice from an audio buffer.
+ * Returns the cloned voice ID.
+ */
+export async function cloneVoice(audioBuffer: Buffer, name: string): Promise<string> {
+  if (isMockMode()) {
+    // In mock mode, return a synthetic voice ID
+    await delay(500);
+    return `cloned_voice_${Date.now()}`;
+  }
+  return getTtsClient().cloneVoice(audioBuffer, name).then(r => r.voiceId);
 }

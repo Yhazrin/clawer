@@ -6,7 +6,7 @@ import { synthesize, type VoiceConfig } from "../tts-pipeline";
 
 // Reusable default voice config
 const DEFAULT_VOICE: VoiceConfig = {
-  voiceId: "female_shuangkuai",
+  voiceId: "Chinese (Mandarin)_News_Anchor",
   speed: 1.0,
   volume: 1.0,
   pitch: 0,
@@ -15,9 +15,15 @@ const DEFAULT_VOICE: VoiceConfig = {
 /**
  * Send a JSON WSMessage to the client.
  */
-function sendWS(ws: WebSocket, event: string, data: unknown): void {
-  if (ws.readyState !== ws.OPEN) return;
-  ws.send(JSON.stringify({ event, data, timestamp: Date.now() }));
+function sendWS(ws: WebSocket, type: string, payload: unknown): void {
+  if (ws.readyState !== ws.OPEN) {
+    console.warn(`[message-handler] sendWS SKIP (not open): type=${type}`);
+    return;
+  }
+  if (type === "text_chunk" || type === "audio_meta" || type === "agent_status") {
+    console.log(`[message-handler] → sendWS type=${type} preview=${JSON.stringify(payload).slice(0, 80)}`);
+  }
+  ws.send(JSON.stringify({ type, payload, timestamp: Date.now() }));
 }
 
 /**
@@ -58,9 +64,9 @@ export async function handleUserMessage(
 ): Promise<void> {
   const { text, sessionId } = payload;
 
-  // 1. Validate session
-  const session = sessionManager.getSession(sessionId);
-  if (!session || session.status !== "active") {
+  // 1. Validate session (auto-create if not exists)
+  const session = sessionManager.getOrCreateSession(sessionId);
+  if (session.status !== "active") {
     sendWS(ws, "message_error", {
       error: { code: "SESSION_NOT_FOUND", message: "Session not found or ended" },
     });
@@ -73,8 +79,18 @@ export async function handleUserMessage(
   // 3. Notify thinking
   sendWS(ws, "agent_status", { status: "thinking" });
 
-  // Determine voice config
-  const voiceConfig: VoiceConfig = DEFAULT_VOICE;
+  // Determine voice config — use session-specific config if available
+  const voiceConfig: VoiceConfig = session.ttsConfig
+    ? {
+        voiceId: session.ttsConfig.voiceId,
+        speed: session.ttsConfig.speed,
+        volume: session.ttsConfig.volume,
+        pitch: session.ttsConfig.pitch,
+      }
+    : DEFAULT_VOICE;
+
+  // Generate a single messageId for this entire assistant response
+  const responseMessageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
   // Sequence counters for ordering
   let textSeq = 0;
@@ -85,18 +101,23 @@ export async function handleUserMessage(
     // Collect full assistant response for session history
     let fullResponse = "";
 
+    // Track all pending TTS operations
+    const pendingTTS: Promise<void>[] = [];
+
     // 4-5. Stream agent text through SyncEngine
     // Each completed sentence triggers TTS synthesis
     const sync = new SyncEngine({
       onToken(token: string) {
         // Forward each token for typewriter rendering
         sendWS(ws, "text_chunk", {
+          messageId: responseMessageId,
           text: token,
           seqId: textSeq++,
           isFinal: false,
         });
       },
-      async onSentence(sentence: string) {
+      onSentence(sentence: string): Promise<void> {
+        console.log(`[message-handler] onSentence: "${sentence.slice(0, 60)}"`);
         fullResponse += sentence;
 
         // Send audio_meta for the first sentence of this response
@@ -109,26 +130,41 @@ export async function handleUserMessage(
         }
         sentenceIndex++;
 
-        // 6. Synthesize and push audio chunks
-        let isFirstChunk = true;
-        for await (const chunk of synthesize(sentence, voiceConfig)) {
-          const isFinal = false;
-          sendAudioFrame(ws, audioSeq++, chunk, isFinal);
-          isFirstChunk = false;
-        }
+        // Synthesize and push audio chunks — returns a promise
+        const ttsPromise = (async () => {
+          let chunkCount = 0;
+          for await (const chunk of synthesize(sentence, voiceConfig)) {
+            sendAudioFrame(ws, audioSeq++, chunk, false);
+            chunkCount++;
+          }
+          console.log(`[message-handler] synthesize done: ${chunkCount} audio chunks, sentence="${sentence.slice(0, 40)}"`);
+        })();
+        pendingTTS.push(ttsPromise);
+        return ttsPromise;
       },
     });
 
     // Feed tokens from agent bridge into sync engine
+    // Don't await receiveToken — let TTS run in parallel with next tokens
     for await (const token of sendMessage(sessionId, text)) {
-      sync.receiveToken(token);
+      const result = sync.receiveToken(token);
+      if (result) pendingTTS.push(result);
     }
 
     // Flush remaining buffer (last sentence may not end with punctuation)
-    sync.flush();
+    const lastResult = sync.flush();
+    if (lastResult) pendingTTS.push(lastResult);
+
+    // Wait for ALL TTS synthesis to complete before sending final frames
+    if (pendingTTS.length > 0) {
+      console.log(`[message-handler] waiting for ${pendingTTS.length} TTS operations...`);
+      await Promise.all(pendingTTS);
+      console.log(`[message-handler] all TTS done`);
+    }
 
     // Mark the last text_chunk as final
     sendWS(ws, "text_chunk", {
+      messageId: responseMessageId,
       text: "",
       seqId: textSeq,
       isFinal: true,

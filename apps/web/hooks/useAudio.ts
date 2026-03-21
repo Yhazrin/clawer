@@ -23,19 +23,34 @@ export function useAudio() {
   const getContext = useCallback((): AudioContext | null => {
     if (ctxRef.current) return ctxRef.current;
     try {
-      const ctx = new AudioContext({ sampleRate: DEFAULT_SAMPLE_RATE });
+      const ctx = new AudioContext({
+        sampleRate: DEFAULT_SAMPLE_RATE,
+        latencyHint: 'interactive'  // Low latency for real-time
+      });
       const gain = ctx.createGain();
       gain.gain.value = volume;
       gain.connect(ctx.destination);
       ctxRef.current = ctx;
       gainRef.current = gain;
+      console.log("[useAudio] AudioContext created, state:", ctx.state, "sampleRate:", ctx.sampleRate);
       return ctx;
-    } catch {
+    } catch (e) {
+      console.error("[useAudio] Failed to create AudioContext:", e);
       return null;
     }
   }, [volume]);
 
+  const ensureUnlocked = useCallback((): AudioContext | null => {
+    const ctx = getContext();
+    if (ctx && ctx.state === "suspended") {
+      console.log("[useAudio] Context suspended, resuming...");
+      ctx.resume();
+    }
+    return ctx;
+  }, [getContext]);
+
   const unlock = useCallback(() => {
+    // Force create the context on first user interaction
     const ctx = getContext();
     if (ctx && ctx.state === "suspended") {
       ctx.resume();
@@ -44,15 +59,21 @@ export function useAudio() {
   }, [getContext]);
 
   const playNext = useCallback(() => {
-    if (playingRef.current) return;
+    if (playingRef.current) {
+      console.log("[useAudio] playNext: already playing, skipping");
+      return;
+    }
     const item = queueRef.current.shift();
     if (!item) {
       setIsPlaying(false);
       return;
     }
 
-    const ctx = getContext();
-    if (!ctx || !gainRef.current) return;
+    const ctx = ensureUnlocked();
+    if (!ctx || !gainRef.current) {
+      console.log("[useAudio] playNext: no ctx or gain, ctx:", !!ctx, "gain:", !!gainRef.current);
+      return;
+    }
 
     playingRef.current = true;
     setIsPlaying(true);
@@ -68,19 +89,31 @@ export function useAudio() {
       playNext();
     };
 
+    console.log("[useAudio] playNext: starting source, buffer duration:", item.buffer.duration, "s, gain:", gainRef.current.gain.value);
     source.start();
-  }, [getContext]);
+  }, [ensureUnlocked]);
 
   const enqueuePcm = useCallback(
     (pcmData: ArrayBuffer, seqId: number, isFinal: boolean) => {
-      const ctx = getContext();
-      if (!ctx) return;
+      const ctx = ensureUnlocked();
+      if (!ctx) {
+        console.error("[useAudio] enqueuePcm: cannot unlock/create context");
+        return;
+      }
+      console.log("[useAudio] enqueuePcm: seqId=", seqId, "isFinal=", isFinal, "pcmBytes=", pcmData.byteLength);
 
       const int16 = new Int16Array(pcmData);
       const float32 = new Float32Array(int16.length);
       for (let i = 0; i < int16.length; i++) {
         float32[i] = int16[i] / 32768.0;
       }
+
+      // Check if audio data is all zeros (silent)
+      let nonZero = 0;
+      for (let i = 0; i < int16.length; i++) {
+        if (int16[i] !== 0) nonZero++;
+      }
+      console.log("[useAudio] PCM check: total=", int16.length, "nonZero=", nonZero, "first values:", int16[0], int16[1], int16[2]);
 
       const buffer = ctx.createBuffer(1, float32.length, DEFAULT_SAMPLE_RATE);
       buffer.getChannelData(0).set(float32);
@@ -90,7 +123,7 @@ export function useAudio() {
 
       playNext();
     },
-    [getContext, playNext]
+    [ensureUnlocked, playNext]
   );
 
   const enqueueBase64 = useCallback(
@@ -126,6 +159,7 @@ export function useAudio() {
 
   const resume = useCallback(() => {
     if (ctxRef.current?.state === "suspended") {
+      console.log("[useAudio] resume: context was suspended, resuming...");
       ctxRef.current.resume();
     }
     playNext();
@@ -146,7 +180,7 @@ export function useAudio() {
     const clamped = Math.max(0, Math.min(1, v));
     setVolume(clamped);
     if (gainRef.current) {
-      gainRef.current.gain.value = clamped;
+      gainRef.current.gain.setTargetAtTime(clamped, gainRef.current.context.currentTime, 0.02);
     }
   }, []);
 
