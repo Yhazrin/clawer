@@ -90,7 +90,7 @@ export function VoicePanel({ isOpen, onToggle, onVoiceChange, onConfigChange, on
   };
 
   return (
-    <div className={`voice-panel ${isOpen ? "open" : ""}`}>
+    <>
       <button className="voice-panel-toggle" onClick={onToggle} aria-label={isOpen ? "关闭音色面板" : "打开音色面板"}>
         <svg width="20" height="20" viewBox="0 0 20 20">
           <path
@@ -101,6 +101,7 @@ export function VoicePanel({ isOpen, onToggle, onVoiceChange, onConfigChange, on
         <span>语音设置</span>
       </button>
 
+      <div className={`voice-panel ${isOpen ? "open" : ""}`}>
       {isOpen && (
         <div className="voice-panel-body">
           {/* Model selector */}
@@ -250,5 +251,6 @@ export function VoicePanel({ isOpen, onToggle, onVoiceChange, onConfigChange, on
         </div>
       )}
     </div>
+  </>
   );
 }
