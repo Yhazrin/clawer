@@ -322,6 +322,11 @@ export class MiniMaxTTS {
         ws.send(JSON.stringify({ event: "task_finish" }));
         cleanup();
         finished = true;
+        // If there's a pending consumer waiting with no chunks in queue, resolve with empty to unblock
+        if (resolveNext && chunkQueue.length === 0) {
+          resolveNext(Buffer.alloc(0));
+          resolveNext = null;
+        }
       }
     });
 
