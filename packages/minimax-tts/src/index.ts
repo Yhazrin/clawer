@@ -306,7 +306,7 @@ export class MiniMaxTTS {
         }
       }
 
-      if (msg.event === "error" || msg.base_resp?.status_code !== undefined) {
+      if (msg.event === "error" || (msg.base_resp?.status_code != null && msg.base_resp?.status_code !== 0)) {
         // Handle both typed base_resp and untyped code/message fields
         const raw = msg as unknown as Record<string, unknown>;
         const errCode = msg.base_resp?.status_code ?? (typeof raw.code === 'number' ? raw.code : -1);
